@@ -1,0 +1,23 @@
+# Site da CJL: um container nginx servindo o build estático.
+# Projeto, usuário de deploy e pasta são próprios da CJL. A única coisa compartilhada com
+# os outros apps da VM é a rede do Caddy, que faz o TLS e repassa o tráfego para cá.
+# Deploy:  docker compose up -d --build
+name: cjl
+
+services:
+  cjl-site:
+    build:
+      context: .
+    container_name: cjl-site
+    restart: unless-stopped
+    # Teto de recursos para o site nunca disputar a VM com os vizinhos.
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 64
+    security_opt: ["no-new-privileges:true"]
+    networks: [proxy]
+
+networks:
+  proxy:
+    external: true
+    name: saplink_default

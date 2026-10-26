@@ -1,0 +1,13 @@
+# Trecho da CJL no Caddyfile compartilhado do servidor (/opt/saplink/deploy/Caddyfile).
+# Cópia versionada do que roda na VM. O gzip fica no Caddy; o nginx do container só serve arquivos.
+# Troque <DOMINIO> pelo domínio da CJL. Enquanto o DNS não aponta para a VM, dá para usar
+# cjl.<IP-DA-VM>.sslip.io, que já resolve para o IP e ganha certificado sozinho.
+
+<DOMINIO> {
+	encode gzip
+	reverse_proxy cjl-site:80
+}
+
+www.<DOMINIO> {
+	redir https://<DOMINIO>{uri} permanent
+}

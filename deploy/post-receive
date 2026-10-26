@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Hook do repo bare /home/cjldeploy/cjl.git (hooks/post-receive, dono cjldeploy, 755).
+# Cada branch recebido vai para o script de deploy, que roda como root pela única regra de sudo do cjldeploy.
+while read -r _old _new ref; do
+  branch="${ref#refs/heads/}"
+  if ! sudo -n /opt/cjl-deploy/deploy.sh "$branch"; then
+    echo "deploy falhou ($branch)"
+  fi
+done

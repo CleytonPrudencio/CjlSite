@@ -1,26 +1,25 @@
-name: Deploy site na VM
+name: deploy
 
+# Todo push na main é publicado na VM (mesma VM do Mergi, atrás do Caddy compartilhado).
 on:
   push:
     branches: [main]
-    paths:
-      - 'FrontEnd/site-cjl/**'
-      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
+# Um deploy por vez; o que chegar depois espera o anterior terminar.
 concurrency:
-  group: deploy-vm
+  group: deploy-main
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: FrontEnd/site-cjl
-    env:
-      VM_PATH: ${{ vars.VM_PATH || '/var/www/cjl' }}
-      VM_PORT: ${{ secrets.VM_PORT || '22' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,32 +29,59 @@ jobs:
           cache: npm
           cache-dependency-path: FrontEnd/site-cjl/package-lock.json
 
-      - name: Instalar dependências
-        run: npm ci
+      # Erro de build para aqui, não no servidor.
+      - run: npm ci
+      - run: npm run build
 
-      - name: Build
-        run: npm run build
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Histórico completo: o repo bare do servidor não aceita push vindo de clone raso.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Configurar SSH
+      - name: Chave de deploy
         env:
-          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
-          VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+          CJL_DEPLOY_KEY: ${{ secrets.CJL_DEPLOY_KEY }}
+          CJL_KNOWN_HOSTS: ${{ secrets.CJL_KNOWN_HOSTS }}
         run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "$VM_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$CJL_DEPLOY_KEY" > ~/.ssh/deploy
+          printf '%s\n' "$CJL_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy ~/.ssh/known_hosts
 
-      - name: Enviar para a VM
+      - name: Publicar na VM
         env:
-          VM_HOST: ${{ secrets.VM_HOST }}
-          VM_USER: ${{ secrets.VM_USER }}
+          DEPLOY_REMOTE: cjldeploy@${{ secrets.CJL_DEPLOY_HOST }}:cjl.git
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
         run: |
-          rsync -az --delete-after \
-            -e "ssh -i ~/.ssh/id_deploy -p $VM_PORT -o StrictHostKeyChecking=yes" \
-            dist/ "$VM_USER@$VM_HOST:$VM_PATH/"
+          # O servidor reconstrói o container no hook do push e escreve o resultado na saída.
+          git push --force "$DEPLOY_REMOTE" "HEAD:refs/heads/main" 2>&1 | tee push.log
+          if grep -q "deploy falhou" push.log; then
+            echo "::error::O servidor recebeu o push, mas o deploy falhou. Veja o log acima."
+            exit 1
+          fi
+          if ! grep -Eq "deploy de main -> cjl-site OK|Everything up-to-date" push.log; then
+            echo "::error::O servidor não confirmou o deploy."
+            exit 1
+          fi
 
-      - name: Limpar chave
+      - name: Site respondendo
+        if: vars.CJL_SITE_URL != ''
+        env:
+          SITE_URL: ${{ vars.CJL_SITE_URL }}
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            code="$(curl -s -o /dev/null -m 15 -w '%{http_code}' "$SITE_URL/" || true)"
+            [ "$code" = "200" ] && { echo "$SITE_URL respondeu 200"; exit 0; }
+            echo "tentativa $attempt: HTTP $code"
+            sleep 5
+          done
+          echo "::error::$SITE_URL não respondeu 200 depois do deploy."
+          exit 1
+
+      - name: Apagar chave
         if: always()
-        run: rm -f ~/.ssh/id_deploy
+        run: rm -f ~/.ssh/deploy
