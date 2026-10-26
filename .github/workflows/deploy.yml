@@ -1,0 +1,61 @@
+name: Deploy site na VM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'FrontEnd/site-cjl/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vm
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: FrontEnd/site-cjl
+    env:
+      VM_PATH: ${{ vars.VM_PATH || '/var/www/cjl' }}
+      VM_PORT: ${{ secrets.VM_PORT || '22' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: FrontEnd/site-cjl/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Configurar SSH
+        env:
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$VM_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Enviar para a VM
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+        run: |
+          rsync -az --delete-after \
+            -e "ssh -i ~/.ssh/id_deploy -p $VM_PORT -o StrictHostKeyChecking=yes" \
+            dist/ "$VM_USER@$VM_HOST:$VM_PATH/"
+
+      - name: Limpar chave
+        if: always()
+        run: rm -f ~/.ssh/id_deploy
