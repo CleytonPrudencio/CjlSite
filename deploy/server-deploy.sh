@@ -25,5 +25,6 @@ rsync -a --delete "$TMP"/ "$SRC"/
 
 cd "$SRC"
 docker compose up -d --build
-docker image prune -f >/dev/null 2>&1 || true
+# limpa só as imagens soltas do projeto cjl; a VM é compartilhada
+docker image prune -f --filter label=com.docker.compose.project=cjl >/dev/null 2>&1 || true
 echo "deploy de $BRANCH -> $SERVICE OK"
