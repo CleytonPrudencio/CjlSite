@@ -51,10 +51,23 @@ o `/opt/cjl-deploy/deploy.sh` e a regra de sudo. Pode rodar de novo sem estragar
 
 ### 3. Caddy
 
-Acrescente o bloco de `deploy/Caddyfile.cjl` no Caddyfile compartilhado
-(`/opt/saplink/deploy/Caddyfile`), trocando `<DOMINIO>` pelo domínio da CJL, e recarregue o
-Caddy do mesmo jeito que foi feito para o Mergi. Enquanto o DNS do domínio não aponta para a VM,
-dá para usar `cjl.<IP-DA-VM>.sslip.io`, que já resolve e ganha certificado sozinho.
+O Caddy é único para todos os sistemas da VM (container `saplink-caddy`, arquivo
+`/opt/saplink/deploy/Caddyfile`). O arquivo é um bind mount de arquivo único: edite **só
+acrescentando** (`cat >>`), **nunca** com `sed -i`, senão o container perde o arquivo.
+
+Troque `<DOMINIO>` em `deploy/Caddyfile.cjl` pelo domínio da CJL e, na VM:
+
+```bash
+cp /opt/saplink/deploy/Caddyfile /opt/saplink/deploy/Caddyfile.bak-$(date +%F)
+cat deploy/Caddyfile.cjl >> /opt/saplink/deploy/Caddyfile
+docker exec saplink-caddy caddy validate --config /etc/caddy/Caddyfile
+docker exec saplink-caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+Se o `validate` reclamar, volte o backup antes de qualquer `reload`. Enquanto o DNS do domínio
+não aponta para a VM, dá para usar `cjl.<IP-DA-VM>.sslip.io`, que já resolve e ganha certificado
+sozinho. O passo a passo de acesso à VM (usuário, chave, atalho SSH) está em
+`docs/vm-runbook.md` no repositório do Mergi (`devz`).
 
 ### 4. GitHub
 
